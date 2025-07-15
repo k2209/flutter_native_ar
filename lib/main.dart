@@ -1,10 +1,10 @@
-
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:flutter/services.dart';
 
 const glbUrl = 'https://modelviewer.dev/shared-assets/models/Astronaut.glb';
-const usdzUrl = 'https://developer.apple.com/augmented-reality/quick-look/models/teapot/teapot.usdz';
 
 void main() {
   runApp(const MyApp());
@@ -26,9 +26,46 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class MyHomePage extends StatelessWidget {
+class MyHomePage extends StatefulWidget {
   final String? title;
   const MyHomePage({Key? key, this.title}) : super(key: key);
+
+  @override
+  State<MyHomePage> createState() => _MyHomePageState();
+}
+
+class _MyHomePageState extends State<MyHomePage> {
+  bool _isLoading = false;
+
+  void _showLoader() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => Center(
+        child: Container(
+          padding: const EdgeInsets.all(32),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text("Converting model...", style: TextStyle(fontSize: 16)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _hideLoader() {
+    if (Navigator.of(context, rootNavigator: true).canPop()) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+  }
 
   void _handleAndroidAR(BuildContext context) async {
     if (Platform.isAndroid) {
@@ -47,17 +84,47 @@ class MyHomePage extends StatelessWidget {
   }
 
   void _handleiOSAR(BuildContext context) async {
-    if (Platform.isIOS) {
-      try {
-        await ARLauncher.launchARIosQuickLook(usdzUrl);
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to open AR model on iOS.')),
-        );
-      }
-    } else {
+    if (!Platform.isIOS) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('This feature is only available on iOS.')),
+      );
+      return;
+    }
+    setState(() => _isLoading = true);
+    _showLoader();
+    try {
+      final apiUrl = Uri.parse(
+          'https://dev.ahura.xyz:3003/convertglbtousdz?url=$glbUrl');
+      final response = await http.get(apiUrl);
+
+      if (response.statusCode != 200) {
+        _hideLoader();
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Conversion failed (API error).')),
+        );
+        return;
+      }
+
+      final map = jsonDecode(response.body);
+      final usdzUrl = map['usdz_url'];
+
+      _hideLoader();
+      setState(() => _isLoading = false);
+
+      if (usdzUrl == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Conversion failed (No URL).')),
+        );
+        return;
+      }
+
+      await ARLauncher.launchARIosQuickLook(usdzUrl);
+    } catch (e) {
+      _hideLoader();
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: ${e.toString()}')),
       );
     }
   }
@@ -65,50 +132,54 @@ class MyHomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF8EC5FC), Color(0xFFE0C3FC)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+      body: Stack(
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF8EC5FC), Color(0xFFE0C3FC)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    widget.title ?? '',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.deepPurple.shade700,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  _FancyButton(
+                    label: "AR Android",
+                    icon: Icons.android_rounded,
+                    color1: Colors.greenAccent,
+                    color2: Colors.teal,
+                    onPressed: () {
+                      _handleAndroidAR(context);
+                    },
+                  ),
+                  const SizedBox(height: 24),
+                  _FancyButton(
+                    label: "AR iOS",
+                    icon: Icons.apple_rounded,
+                    color1: Colors.black87,
+                    color2: Colors.grey,
+                    onPressed: () {
+                      _handleiOSAR(context);
+                    },
+                  ),
+                ],
+              ),
+            ),
           ),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                title ?? '',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.deepPurple.shade700,
-                  letterSpacing: 1.2,
-                ),
-              ),
-              const SizedBox(height: 32),
-              _FancyButton(
-                label: "AR Android",
-                icon: Icons.android_rounded,
-                color1: Colors.greenAccent,
-                color2: Colors.teal,
-                onPressed: () {
-                  _handleAndroidAR(context);
-                },
-              ),
-              const SizedBox(height: 24),
-              _FancyButton(
-                label: "AR iOS",
-                icon: Icons.apple_rounded,
-                color1: Colors.black87,
-                color2: Colors.grey,
-                onPressed: () {
-                  _handleiOSAR(context);
-                },
-              ),
-            ],
-          ),
-        ),
+        ],
       ),
     );
   }
@@ -190,108 +261,3 @@ class ARLauncher {
     await _channel.invokeMethod('launchARQuickLook', {'url': usdzUrl});
   }
 }
-
-
-// import 'package:flutter/material.dart';
-// import 'package:url_launcher/url_launcher.dart';
-
-// void main() {
-//   runApp(const MyApp());
-// }
-
-// class MyApp extends StatelessWidget {
-//   const MyApp({super.key});
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return MaterialApp(
-//       title: 'AR Quick Look Demo',
-//       theme: ThemeData(
-//         primarySwatch: Colors.blue,
-//         visualDensity: VisualDensity.adaptivePlatformDensity,
-//       ),
-//       home: const ARQuickLookScreen(),
-//     );
-//   }
-// }
-
-// class ARQuickLookScreen extends StatelessWidget {
-//   const ARQuickLookScreen({super.key});
-
-//   // The URL of the USDZ model for Apple Quick Look AR
-//   // This is a direct link to the model on Apple's developer site.
-//   final String usdzModelUrl =
-//       'https://developer.apple.com/augmented-reality/quick-look/models/teapot/teapot.usdz';
-
-//   /// Attempts to open the AR Quick Look experience.
-//   /// On iOS, a direct link to a .usdz file is automatically handled by Quick Look.
-//   Future<void> _openARQuickLook(BuildContext context) async {
-//     final Uri url = Uri.parse(usdzModelUrl);
-
-//     try {
-//       // It's generally good practice to check if a URL can be launched,
-//       // but for well-known schemes like https on iOS, it often isn't strictly necessary
-//       // as launchUrl will attempt to open directly.
-//       // The error you're seeing suggests the problem is deeper in the native bridge.
-//       if (await canLaunchUrl(url)) {
-//         // Attempt to launch the URL. iOS should automatically open Quick Look.
-//         await launchUrl(url);
-//       } else {
-//         // Fallback if the URL somehow can't be launched (e.g., no app to handle it)
-//         _showErrorSnackBar(context, 'Could not open AR view: No handler found for URL.');
-//         print('Error: Could not launch $url');
-//       }
-//     } catch (e) {
-//       // Catch any exceptions during the launch process, including PlatformException
-//       _showErrorSnackBar(context, 'Failed to open AR view. Error: ${e.toString()}');
-//       print('Caught exception: $e');
-//     }
-//   }
-
-//   // Helper function to show a snackbar with an error message
-//   void _showErrorSnackBar(BuildContext context, String message) {
-//     ScaffoldMessenger.of(context).showSnackBar(
-//       SnackBar(
-//         content: Text(message),
-//         backgroundColor: Colors.red,
-//       ),
-//     );
-//   }
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Scaffold(
-//       appBar: AppBar(
-//         title: const Text('AR Quick Look Demo'),
-//         centerTitle: true,
-//       ),
-//       body: Center(
-//         child: Column(
-//           mainAxisAlignment: MainAxisAlignment.center,
-//           children: [
-//             const Text(
-//               'Tap the button to launch the AR Quick Look experience for a teapot model.',
-//               textAlign: TextAlign.center,
-//               style: TextStyle(fontSize: 16),
-//             ),
-//             const SizedBox(height: 30),
-//             ElevatedButton.icon(
-//               onPressed: () => _openARQuickLook(context), // Pass context to the method
-//               icon: const Icon(Icons.videocam),
-//               label: const Text(
-//                 'Open AR View',
-//                 style: TextStyle(fontSize: 18),
-//               ),
-//               style: ElevatedButton.styleFrom(
-//                 padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
-//                 shape: RoundedRectangleBorder(
-//                   borderRadius: BorderRadius.circular(10),
-//                 ),
-//               ),
-//             ),
-//           ],
-//         ),
-//       ),
-//     );
-//   }
-// }
